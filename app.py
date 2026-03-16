@@ -9,7 +9,7 @@ from math import radians, sin, cos, sqrt, atan2
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- CONFIGURAZIONE PAGINA STREAMLIT ---
-st.set_page_config(page_title="Analisi Rotatorie OSM", page_icon="🗺️")
+st.set_page_config(page_title="Analisi Rotatorie SLiM", page_icon="🗺️")
 
 # --- INIZIALIZZAZIONE SESSIONE API ---
 sessione = requests.Session()
@@ -352,7 +352,7 @@ def elabora_singolo_nodo(idx, lat, lon):
     return idx, esito, diametro, rami
 
 # --- INTERFACCIA STREAMLIT ---
-st.title("🗺️ Analisi Infrastrutture OSM")
+st.title("🗺️ Screening Rotatorie SLiM")
 st.markdown("Carica un file Excel contenente le coordinate per analizzare le rotatorie, calcolarne il diametro e i rami.")
 
 file_caricato = st.file_uploader("Scegli un file Excel (.xlsx)", type=["xlsx"])
