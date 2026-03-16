@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 st.set_page_config(page_title="Analisi Rotatorie SLiM", page_icon="🗺️")
 
 sessione = requests.Session()
-sessione.headers.update({'User-Agent': 'Script_Analisi_Infrastrutture_Universita/3.0'})
+sessione.headers.update({'User-Agent': 'Script_Analisi_Infrastrutture_Universita/4.0'})
 
 def invia_query_osm(query):
     endpoints = [
@@ -358,38 +358,42 @@ if 'analisi_in_corso' not in st.session_state:
 file_caricato = st.file_uploader("Scegli un file Excel (.xlsx)", type=["xlsx"])
 
 if file_caricato is not None:
-    df_iniziale = pd.read_excel(file_caricato)
-    st.write("Anteprima dei dati caricati:")
-    st.dataframe(df_iniziale.head(3))
+    if 'df_elaborato' not in st.session_state or non st.session_state['analisi_in_corso']:
+        df_iniziale = pd.read_excel(file_caricato)
+        for col in ['Rotatoria', 'Diametro_Esterno_m', 'Numero di rami']:
+            if col not in df_iniziale.columns:
+                df_iniziale[col] = None
+        if 'df_elaborato' not in st.session_state:
+            st.session_state['df_elaborato'] = df_iniziale
+
+    st.write("Anteprima dei dati:")
+    st.dataframe(st.session_state['df_elaborato'].head(3))
     
-    if st.button("🚀 Avvia Analisi", type="primary"):
+    if st.button("🚀 Avvia Analisi Continua", type="primary") and not st.session_state['analisi_in_corso']:
         st.session_state['analisi_in_corso'] = True
+        st.rerun()
         
     if st.session_state['analisi_in_corso']:
-        df = df_iniziale.copy()
-        
-        for col in ['Rotatoria', 'Diametro_Esterno_m', 'Numero di rami']:
-            if col not in df.columns:
-                df[col] = None
-                
+        df = st.session_state['df_elaborato']
         indici_da_elaborare = df[df['Rotatoria'].isna()].index.tolist()
         
         if not indici_da_elaborare:
             st.info("Tutti i nodi nel file risultano già elaborati.")
-            st.session_state['df_elaborato'] = df
             st.session_state['analisi_in_corso'] = False
         else:
-            st.markdown("### Elaborazione in corso...")
-            progress_bar = st.progress(0)
-            status_text = st.empty()
+            totale_righe = len(df)
+            elaborati_finora = totale_righe - len(indici_da_elaborare)
             
-            totale = len(indici_da_elaborare)
-            completati = 0
+            st.markdown("### Elaborazione lotti in corso...")
+            progress_bar = st.progress(elaborati_finora / totale_righe)
+            st.text(f"Completati {elaborati_finora} su {totale_righe} nodi...")
+            
+            lotto = indici_da_elaborare[:10]
             
             with ThreadPoolExecutor(max_workers=3) as executor:
                 futures = {
                     executor.submit(elabora_singolo_nodo, idx, df.at[idx, 'Latitudine'], df.at[idx, 'Longitudine']): idx 
-                    for idx in indici_da_elaborare
+                    for idx in lotto
                 }
                 
                 for future in as_completed(futures):
@@ -403,26 +407,11 @@ if file_caricato is not None:
                             df.at[idx, 'Numero di rami'] = rami
                     except Exception:
                         df.at[idx, 'Rotatoria'] = 'errore'
-                        
-                    completati += 1
-                    progress_bar.progress(completati / totale)
-                    status_text.text(f"Completati {completati} su {totale} nodi elaborati...")
-                    
-            st.success("✅ Elaborazione globale conclusa con successo!")
+
             st.session_state['df_elaborato'] = df
-            st.session_state['analisi_in_corso'] = False
+            time.sleep(1)
+            st.rerun()
 
 if 'df_elaborato' in st.session_state and not st.session_state.get('analisi_in_corso', False):
-    st.markdown("---")
-    st.markdown("### Risultato pronto")
-    
-    output = io.BytesIO()
-    st.session_state['df_elaborato'].to_excel(output, index=False)
-    output.seek(0)
-    
-    st.download_button(
-        label="⬇️ Scarica il File Definitivo (.xlsx)",
-        data=output,
-        file_name="Analisi_Infrastrutture_Completata.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    df_finale = st.session_state['df_elaborato']
+    if df_finale['Rotatoria'].notna().any
