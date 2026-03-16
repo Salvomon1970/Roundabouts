@@ -8,14 +8,11 @@ import io
 from math import radians, sin, cos, sqrt, atan2
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# --- CONFIGURAZIONE PAGINA STREAMLIT ---
 st.set_page_config(page_title="Analisi Rotatorie SLiM", page_icon="🗺️")
 
-# --- INIZIALIZZAZIONE SESSIONE API ---
 sessione = requests.Session()
 sessione.headers.update({'User-Agent': 'Script_Analisi_Infrastrutture_Universita/3.0'})
 
-# --- FUNZIONI CORE (Tua logica originale intatta) ---
 def invia_query_osm(query):
     endpoints = [
         "https://lz4.overpass-api.de/api/interpreter",
@@ -23,7 +20,7 @@ def invia_query_osm(query):
         "https://overpass-api.de/api/interpreter"
     ]
     attesa = 2
-    while True:
+    for tentativo in range(15):
         url = random.choice(endpoints)
         try:
             risposta = sessione.get(url, params={'data': query}, timeout=25)
@@ -36,6 +33,7 @@ def invia_query_osm(query):
                 time.sleep(2)
         except Exception:
             time.sleep(attesa)
+    return None
 
 def check_rotatoria(lat, lon):
     query = f"""
@@ -351,22 +349,25 @@ def elabora_singolo_nodo(idx, lat, lon):
         rami = conta_rami_assoluto(lat, lon)
     return idx, esito, diametro, rami
 
-# --- INTERFACCIA STREAMLIT ---
-st.title("🗺️ Screening Rotatorie SLiM")
+st.title("🗺️ Analisi Rotatorie SLiM")
 st.markdown("Carica un file Excel contenente le coordinate per analizzare le rotatorie, calcolarne il diametro e i rami.")
+
+if 'analisi_in_corso' not in st.session_state:
+    st.session_state['analisi_in_corso'] = False
 
 file_caricato = st.file_uploader("Scegli un file Excel (.xlsx)", type=["xlsx"])
 
 if file_caricato is not None:
-    # Legge il file in memoria all'upload
     df_iniziale = pd.read_excel(file_caricato)
     st.write("Anteprima dei dati caricati:")
     st.dataframe(df_iniziale.head(3))
     
-    if st.button("🚀 Avvia Analisi in Parallelo", type="primary"):
+    if st.button("🚀 Avvia Analisi", type="primary"):
+        st.session_state['analisi_in_corso'] = True
+        
+    if st.session_state['analisi_in_corso']:
         df = df_iniziale.copy()
         
-        # Prepara le colonne
         for col in ['Rotatoria', 'Diametro_Esterno_m', 'Numero di rami']:
             if col not in df.columns:
                 df[col] = None
@@ -376,8 +377,8 @@ if file_caricato is not None:
         if not indici_da_elaborare:
             st.info("Tutti i nodi nel file risultano già elaborati.")
             st.session_state['df_elaborato'] = df
+            st.session_state['analisi_in_corso'] = False
         else:
-            # Setup UI per il progresso
             st.markdown("### Elaborazione in corso...")
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -385,7 +386,6 @@ if file_caricato is not None:
             totale = len(indici_da_elaborare)
             completati = 0
             
-            # Esecuzione multithreading (identica al tuo script)
             with ThreadPoolExecutor(max_workers=3) as executor:
                 futures = {
                     executor.submit(elabora_singolo_nodo, idx, df.at[idx, 'Latitudine'], df.at[idx, 'Longitudine']): idx 
@@ -393,29 +393,29 @@ if file_caricato is not None:
                 }
                 
                 for future in as_completed(futures):
-                    idx, esito, diametro, rami = future.result()
-                    df.at[idx, 'Rotatoria'] = esito
-                    if diametro is not None:
-                        df.at[idx, 'Diametro_Esterno_m'] = diametro
-                    if rami is not None:
-                        df.at[idx, 'Numero di rami'] = rami
+                    idx = futures[future]
+                    try:
+                        idx_res, esito, diametro, rami = future.result()
+                        df.at[idx, 'Rotatoria'] = esito
+                        if diametro is not None:
+                            df.at[idx, 'Diametro_Esterno_m'] = diametro
+                        if rami is not None:
+                            df.at[idx, 'Numero di rami'] = rami
+                    except Exception:
+                        df.at[idx, 'Rotatoria'] = 'errore'
                         
-                    # Aggiornamento UI
                     completati += 1
                     progress_bar.progress(completati / totale)
                     status_text.text(f"Completati {completati} su {totale} nodi elaborati...")
-            
+                    
             st.success("✅ Elaborazione globale conclusa con successo!")
-            
-            # Salvataggio nella sessione del browser per permettere il download
             st.session_state['df_elaborato'] = df
+            st.session_state['analisi_in_corso'] = False
 
-# --- DOWNLOAD DEL RISULTATO ---
-if 'df_elaborato' in st.session_state:
+if 'df_elaborato' in st.session_state and not st.session_state.get('analisi_in_corso', False):
     st.markdown("---")
     st.markdown("### Risultato pronto")
     
-    # Creiamo un file virtuale in memoria
     output = io.BytesIO()
     st.session_state['df_elaborato'].to_excel(output, index=False)
     output.seek(0)
