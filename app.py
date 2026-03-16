@@ -2,16 +2,14 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
-import math
 import random
 import io
 from math import radians, sin, cos, sqrt, atan2
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(page_title="Analisi Rotatorie SLiM", page_icon="🗺️")
 
 sessione = requests.Session()
-sessione.headers.update({'User-Agent': 'Script_Analisi_Infrastrutture_Universita/4.0'})
+sessione.headers.update({'User-Agent': 'Script_Analisi_Infrastrutture_Universita/4.1'})
 
 def invia_query_osm(query):
     endpoints = [
@@ -184,14 +182,6 @@ def calcola_diametro_integrato(lat, lon):
     
     return None
 
-def haversine(lat1, lon1, lat2, lon2):
-    R = 6371000
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
-
 def conta_rami_assoluto(lat, lon):
     query = f"""
     [out:json];
@@ -243,7 +233,7 @@ def conta_rami_assoluto(lat, lon):
             if not c_nodes: continue
             c_lat = sum(pt[0] for pt in c_nodes) / len(c_nodes)
             c_lon = sum(pt[1] for pt in c_nodes) / len(c_nodes)
-            dist = haversine(lat, lon, c_lat, c_lon)
+            dist = calcola_distanza(lat, lon, c_lat, c_lon)
             if dist < min_dist_to_cluster:
                 min_dist_to_cluster = dist
                 best_cluster = c
@@ -285,7 +275,7 @@ def conta_rami_assoluto(lat, lon):
             max_dist = -1
             furthest_pt = None
             for pt in pts_bwd:
-                dist_R = min(haversine(pt[0], pt[1], r[0], r[1]) for r in target_r_nodes)
+                dist_R = min(calcola_distanza(pt[0], pt[1], r[0], r[1]) for r in target_r_nodes)
                 if dist_R > max_dist:
                     max_dist = dist_R
                     furthest_pt = pt
@@ -308,7 +298,7 @@ def conta_rami_assoluto(lat, lon):
             max_dist = -1
             furthest_pt = None
             for pt in pts_fwd:
-                dist_R = min(haversine(pt[0], pt[1], r[0], r[1]) for r in target_r_nodes)
+                dist_R = min(calcola_distanza(pt[0], pt[1], r[0], r[1]) for r in target_r_nodes)
                 if dist_R > max_dist:
                     max_dist = dist_R
                     furthest_pt = pt
@@ -326,7 +316,7 @@ def conta_rami_assoluto(lat, lon):
         found = False
         for c in clusters:
             for cpt in c:
-                if haversine(pt[0], pt[1], cpt[0], cpt[1]) < 25:
+                if calcola_distanza(pt[0], pt[1], cpt[0], cpt[1]) < 25:
                     c.append(pt)
                     found = True
                     break
@@ -390,26 +380,22 @@ if file_caricato is not None:
             
             lotto = indici_da_elaborare[:10]
             
-            with ThreadPoolExecutor(max_workers=3) as executor:
-                futures = {
-                    executor.submit(elabora_singolo_nodo, idx, df.at[idx, 'Latitudine'], df.at[idx, 'Longitudine']): idx 
-                    for idx in lotto
-                }
+            for idx in lotto:
+                try:
+                    lat = df.at[idx, 'Latitudine']
+                    lon = df.at[idx, 'Longitudine']
+                    idx_res, esito, diametro, rami = elabora_singolo_nodo(idx, lat, lon)
+                    df.at[idx, 'Rotatoria'] = esito
+                    if diametro is not None:
+                        df.at[idx, 'Diametro_Esterno_m'] = diametro
+                    if rami is not None:
+                        df.at[idx, 'Numero di rami'] = rami
+                except Exception:
+                    df.at[idx, 'Rotatoria'] = 'errore'
                 
-                for future in as_completed(futures):
-                    idx = futures[future]
-                    try:
-                        idx_res, esito, diametro, rami = future.result()
-                        df.at[idx, 'Rotatoria'] = esito
-                        if diametro is not None:
-                            df.at[idx, 'Diametro_Esterno_m'] = diametro
-                        if rami is not None:
-                            df.at[idx, 'Numero di rami'] = rami
-                    except Exception:
-                        df.at[idx, 'Rotatoria'] = 'errore'
+                time.sleep(1)
 
             st.session_state['df_elaborato'] = df
-            time.sleep(1)
             st.rerun()
 
 if 'df_elaborato' in st.session_state and not st.session_state.get('analisi_in_corso', False):
