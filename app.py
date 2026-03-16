@@ -9,7 +9,7 @@ from math import radians, sin, cos, sqrt, atan2
 st.set_page_config(page_title="Analisi Rotatorie SLiM", page_icon="🗺️")
 
 sessione = requests.Session()
-sessione.headers.update({'User-Agent': 'Script_Analisi_Infrastrutture_Universita/4.1'})
+sessione.headers.update({'User-Agent': 'Script_Analisi_Infrastrutture_Universita/4.2'})
 
 def invia_query_osm(query):
     endpoints = [
@@ -18,15 +18,17 @@ def invia_query_osm(query):
         "https://overpass-api.de/api/interpreter"
     ]
     attesa = 2
-    for tentativo in range(15):
+    for tentativo in range(6):
         url = random.choice(endpoints)
         try:
-            risposta = sessione.get(url, params={'data': query}, timeout=25)
+            risposta = sessione.get(url, params={'data': query}, timeout=20)
             if risposta.status_code == 200:
                 return risposta.json()
+            elif risposta.status_code == 400:
+                return None
             elif risposta.status_code == 429:
                 time.sleep(attesa)
-                attesa = min(attesa + 3, 20)
+                attesa = min(attesa + 2, 10)
             else:
                 time.sleep(2)
         except Exception:
@@ -374,25 +376,38 @@ if file_caricato is not None:
             totale_righe = len(df)
             elaborati_finora = totale_righe - len(indici_da_elaborare)
             
-            st.markdown("### Elaborazione lotti in corso...")
-            progress_bar = st.progress(elaborati_finora / totale_righe)
-            st.text(f"Completati {elaborati_finora} su {totale_righe} nodi...")
+            st.markdown("### Elaborazione in corso...")
+            progress_bar = st.progress(elaborati_finora / totale_righe if totale_righe > 0 else 0)
+            status_text = st.empty()
+            status_text.text(f"Completati {elaborati_finora} su {totale_righe} nodi...")
             
             lotto = indici_da_elaborare[:10]
             
             for idx in lotto:
                 try:
-                    lat = df.at[idx, 'Latitudine']
-                    lon = df.at[idx, 'Longitudine']
-                    idx_res, esito, diametro, rami = elabora_singolo_nodo(idx, lat, lon)
-                    df.at[idx, 'Rotatoria'] = esito
-                    if diametro is not None:
-                        df.at[idx, 'Diametro_Esterno_m'] = diametro
-                    if rami is not None:
-                        df.at[idx, 'Numero di rami'] = rami
+                    raw_lat = df.at[idx, 'Latitudine']
+                    raw_lon = df.at[idx, 'Longitudine']
+                    
+                    if pd.isna(raw_lat) or pd.isna(raw_lon):
+                        df.at[idx, 'Rotatoria'] = 'coordinate assenti'
+                    else:
+                        lat = float(str(raw_lat).replace(',', '.').strip())
+                        lon = float(str(raw_lon).replace(',', '.').strip())
+                        
+                        idx_res, esito, diametro, rami = elabora_singolo_nodo(idx, lat, lon)
+                        
+                        df.at[idx, 'Rotatoria'] = esito
+                        if diametro is not None:
+                            df.at[idx, 'Diametro_Esterno_m'] = diametro
+                        if rami is not None:
+                            df.at[idx, 'Numero di rami'] = rami
+                            
                 except Exception:
                     df.at[idx, 'Rotatoria'] = 'errore'
                 
+                elaborati_finora += 1
+                progress_bar.progress(min(elaborati_finora / totale_righe, 1.0))
+                status_text.text(f"Completati {elaborati_finora} su {totale_righe} nodi...")
                 time.sleep(1)
 
             st.session_state['df_elaborato'] = df
