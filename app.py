@@ -9,7 +9,7 @@ from math import radians, sin, cos, sqrt, atan2
 st.set_page_config(page_title="Analisi Rotatorie SLiM", page_icon="🗺️")
 
 sessione = requests.Session()
-sessione.headers.update({'User-Agent': 'Script_Analisi_Infrastrutture_Universita/4.2'})
+sessione.headers.update({'User-Agent': 'Ricerca_Accademica_Strade_Universita/5.0'})
 
 def invia_query_osm(query):
     endpoints = [
@@ -17,22 +17,18 @@ def invia_query_osm(query):
         "https://z.overpass-api.de/api/interpreter",
         "https://overpass-api.de/api/interpreter"
     ]
-    attesa = 2
-    for tentativo in range(6):
+    for tentativo in range(3):
         url = random.choice(endpoints)
         try:
-            risposta = sessione.get(url, params={'data': query}, timeout=20)
+            risposta = sessione.get(url, params={'data': query}, timeout=10)
             if risposta.status_code == 200:
                 return risposta.json()
-            elif risposta.status_code == 400:
-                return None
             elif risposta.status_code == 429:
-                time.sleep(attesa)
-                attesa = min(attesa + 2, 10)
+                time.sleep(3)
             else:
-                time.sleep(2)
+                time.sleep(1)
         except Exception:
-            time.sleep(attesa)
+            time.sleep(1)
     return None
 
 def check_rotatoria(lat, lon):
@@ -44,7 +40,7 @@ def check_rotatoria(lat, lon):
     dati = invia_query_osm(query)
     if dati and 'elements' in dati and len(dati['elements']) > 0:
         return "sì"
-    return "no"
+    return "no" if dati is not None else "errore server"
 
 def calcola_distanza(lat1, lon1, lat2, lon2):
     R = 6371000
@@ -332,17 +328,19 @@ def conta_rami_assoluto(lat, lon):
     if numero_rami > 6: return 6
     return numero_rami
 
-def elabora_singolo_nodo(idx, lat, lon):
+def elabora_singolo_nodo(lat, lon):
     esito = check_rotatoria(lat, lon)
     diametro = None
     rami = None
     if esito in ['sì', 'si', 'yes']:
         diametro = calcola_diametro_integrato(lat, lon)
         rami = conta_rami_assoluto(lat, lon)
-    return idx, esito, diametro, rami
+    return esito, diametro, rami
 
-st.title("🗺️ Analisi Rotatorie SLiM")
-st.markdown("Carica un file Excel contenente le coordinate per analizzare le rotatorie, calcolarne il diametro e i rami.")
+st.title("🗺️ Screening Rotatorie SLiM")
+st.markdown("Carica un file Excel contenente le coordinate stradali. L'elaborazione avverrà a piccoli blocchi per rispettare i limiti del database.")
+
+pausa_richiesta = st.slider("Pausa di sicurezza tra le coordinate (in secondi)", min_value=1.0, max_value=10.0, value=2.0, step=0.5)
 
 if 'analisi_in_corso' not in st.session_state:
     st.session_state['analisi_in_corso'] = False
@@ -358,10 +356,7 @@ if file_caricato is not None:
         if 'df_elaborato' not in st.session_state:
             st.session_state['df_elaborato'] = df_iniziale
 
-    st.write("Anteprima dei dati:")
-    st.dataframe(st.session_state['df_elaborato'].head(3))
-    
-    if st.button("🚀 Avvia elaborazione", type="primary") and not st.session_state['analisi_in_corso']:
+    if st.button("🚀 Avvia elaborazione sicura", type="primary") and not st.session_state['analisi_in_corso']:
         st.session_state['analisi_in_corso'] = True
         st.rerun()
         
@@ -370,31 +365,33 @@ if file_caricato is not None:
         indici_da_elaborare = df[df['Rotatoria'].isna()].index.tolist()
         
         if not indici_da_elaborare:
-            st.info("Tutti i nodi nel file risultano già elaborati.")
+            st.success("Tutte le infrastrutture nel file risultano già analizzate.")
             st.session_state['analisi_in_corso'] = False
         else:
             totale_righe = len(df)
             elaborati_finora = totale_righe - len(indici_da_elaborare)
             
-            st.markdown("### Elaborazione in corso...")
             progress_bar = st.progress(elaborati_finora / totale_righe if totale_righe > 0 else 0)
-            status_text = st.empty()
-            status_text.text(f"Completati {elaborati_finora} su {totale_righe} nodi...")
+            status_testo = st.empty()
+            monitor_log = st.empty()
             
-            lotto = indici_da_elaborare[:10]
+            lotto = indici_da_elaborare[:2]
             
             for idx in lotto:
+                status_testo.markdown(f"**In elaborazione:** riga {idx + 1} di {totale_righe}")
                 try:
                     raw_lat = df.at[idx, 'Latitudine']
                     raw_lon = df.at[idx, 'Longitudine']
                     
                     if pd.isna(raw_lat) or pd.isna(raw_lon):
+                        monitor_log.warning(f"Coordinate mancanti alla riga {idx + 1}.")
                         df.at[idx, 'Rotatoria'] = 'coordinate assenti'
                     else:
+                        monitor_log.info(f"Connessione al server per lat {raw_lat}, lon {raw_lon}...")
                         lat = float(str(raw_lat).replace(',', '.').strip())
                         lon = float(str(raw_lon).replace(',', '.').strip())
                         
-                        idx_res, esito, diametro, rami = elabora_singolo_nodo(idx, lat, lon)
+                        esito, diametro, rami = elabora_singolo_nodo(lat, lon)
                         
                         df.at[idx, 'Rotatoria'] = esito
                         if diametro is not None:
@@ -402,13 +399,13 @@ if file_caricato is not None:
                         if rami is not None:
                             df.at[idx, 'Numero di rami'] = rami
                             
-                except Exception:
-                    df.at[idx, 'Rotatoria'] = 'errore'
+                        monitor_log.success(f"Riga {idx + 1} completata con esito: {esito}")
+                            
+                except Exception as e:
+                    monitor_log.error(f"Impossibile leggere le coordinate alla riga {idx + 1}.")
+                    df.at[idx, 'Rotatoria'] = 'errore lettura'
                 
-                elaborati_finora += 1
-                progress_bar.progress(min(elaborati_finora / totale_righe, 1.0))
-                status_text.text(f"Completati {elaborati_finora} su {totale_righe} nodi...")
-                time.sleep(1)
+                time.sleep(pausa_richiesta)
 
             st.session_state['df_elaborato'] = df
             st.rerun()
@@ -417,15 +414,14 @@ if 'df_elaborato' in st.session_state and not st.session_state.get('analisi_in_c
     df_finale = st.session_state['df_elaborato']
     if df_finale['Rotatoria'].notna().any():
         st.markdown("---")
-        st.markdown("### Risultato pronto")
         
         output = io.BytesIO()
         df_finale.to_excel(output, index=False)
         output.seek(0)
         
         st.download_button(
-            label="⬇️ Scarica il File Definitivo (.xlsx)",
+            label="⬇️ Scarica il dataset finale delle infrastrutture (.xlsx)",
             data=output,
-            file_name="Analisi_Infrastrutture_Completata.xlsx",
+            file_name="Infrastrutture_Completate.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
