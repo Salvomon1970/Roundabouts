@@ -358,7 +358,7 @@ if 'analisi_in_corso' not in st.session_state:
 file_caricato = st.file_uploader("Scegli un file Excel (.xlsx)", type=["xlsx"])
 
 if file_caricato is not None:
-    if 'df_elaborato' not in st.session_state or non st.session_state['analisi_in_corso']:
+    if 'df_elaborato' not in st.session_state or not st.session_state['analisi_in_corso']:
         df_iniziale = pd.read_excel(file_caricato)
         for col in ['Rotatoria', 'Diametro_Esterno_m', 'Numero di rami']:
             if col not in df_iniziale.columns:
@@ -369,7 +369,7 @@ if file_caricato is not None:
     st.write("Anteprima dei dati:")
     st.dataframe(st.session_state['df_elaborato'].head(3))
     
-    if st.button("🚀 Avvia Analisi Continua", type="primary") and not st.session_state['analisi_in_corso']:
+    if st.button("🚀 Avvia elaborazione", type="primary") and not st.session_state['analisi_in_corso']:
         st.session_state['analisi_in_corso'] = True
         st.rerun()
         
@@ -414,4 +414,17 @@ if file_caricato is not None:
 
 if 'df_elaborato' in st.session_state and not st.session_state.get('analisi_in_corso', False):
     df_finale = st.session_state['df_elaborato']
-    if df_finale['Rotatoria'].notna().any
+    if df_finale['Rotatoria'].notna().any():
+        st.markdown("---")
+        st.markdown("### Risultato pronto")
+        
+        output = io.BytesIO()
+        df_finale.to_excel(output, index=False)
+        output.seek(0)
+        
+        st.download_button(
+            label="⬇️ Scarica il File Definitivo (.xlsx)",
+            data=output,
+            file_name="Analisi_Infrastrutture_Completata.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
