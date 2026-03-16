@@ -9,7 +9,7 @@ from math import radians, sin, cos, sqrt, atan2
 st.set_page_config(page_title="Analisi Rotatorie SLiM", page_icon="🗺️")
 
 sessione = requests.Session()
-sessione.headers.update({'User-Agent': 'Ricerca_Accademica_Strade_Universita/5.0'})
+sessione.headers.update({'User-Agent': 'Ricerca_Accademica_Strade_Universita/6.0'})
 
 def invia_query_osm(query):
     endpoints = [
@@ -17,18 +17,20 @@ def invia_query_osm(query):
         "https://z.overpass-api.de/api/interpreter",
         "https://overpass-api.de/api/interpreter"
     ]
-    for tentativo in range(3):
+    attesa = 3
+    for tentativo in range(10):
         url = random.choice(endpoints)
         try:
-            risposta = sessione.get(url, params={'data': query}, timeout=10)
+            risposta = sessione.get(url, params={'data': query}, timeout=35)
             if risposta.status_code == 200:
                 return risposta.json()
             elif risposta.status_code == 429:
-                time.sleep(3)
+                time.sleep(attesa)
+                attesa += 5
             else:
-                time.sleep(1)
+                time.sleep(attesa)
         except Exception:
-            time.sleep(1)
+            time.sleep(attesa)
     return None
 
 def check_rotatoria(lat, lon):
@@ -362,10 +364,10 @@ if file_caricato is not None:
         
     if st.session_state['analisi_in_corso']:
         df = st.session_state['df_elaborato']
-        indici_da_elaborare = df[df['Rotatoria'].isna()].index.tolist()
+        indici_da_elaborare = df[df['Rotatoria'].isna() | (df['Rotatoria'] == 'errore server')].index.tolist()
         
         if not indici_da_elaborare:
-            st.success("Tutte le infrastrutture nel file risultano già analizzate.")
+            st.success("Tutte le infrastrutture nel file risultano già analizzate con successo.")
             st.session_state['analisi_in_corso'] = False
         else:
             totale_righe = len(df)
@@ -401,10 +403,13 @@ if file_caricato is not None:
                             
                         monitor_log.success(f"Riga {idx + 1} completata con esito: {esito}")
                             
-                except Exception as e:
+                except Exception:
                     monitor_log.error(f"Impossibile leggere le coordinate alla riga {idx + 1}.")
                     df.at[idx, 'Rotatoria'] = 'errore lettura'
                 
+                elaborati_finora += 1
+                progress_bar.progress(min(elaborati_finora / totale_righe, 1.0))
+                status_testo.markdown(f"**Completati {elaborati_finora} su {totale_righe} nodi...**")
                 time.sleep(pausa_richiesta)
 
             st.session_state['df_elaborato'] = df
